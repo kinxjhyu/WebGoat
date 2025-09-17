@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -22,10 +22,13 @@ jobs:
           distribution: 'temurin'
 
       - name: Build with Maven
-        run: mvn -B package --file pom.xml
+        run: mvn -B package
+        working-directory: ./WebGoat-2025.3
 
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@v3
+        with:
+          projectBaseDir: ./WebGoat-2025.3   # 중요: 소나큐브가 올바른 프로젝트 경로에서 실행되도록 지정
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
