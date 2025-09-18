@@ -6,11 +6,14 @@ on:
       - main
 
 jobs:
-  sonarqube:
+  build:
+    name: Build and analyze
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
+      # 1) SonarQube 스캔 실행
       - name: SonarQube Scan
         id: scan
         uses: sonarsource/sonarqube-scan-action@v3
@@ -19,19 +22,24 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
           SONAR_PROJECT_KEY: ${{ github.event.repository.name }}
 
-      # 분석 완료 대기 (Task API 사용)
+      # 2) ceTaskId 추출
+      - name: Extract ceTaskId
+        id: extract-task
+        run: |
+          # 스캐너 로그에서 ceTaskId 추출
+          TASK_ID=$(grep -o "id=[a-f0-9-]\+" $GITHUB_STEP_SUMMARY | head -1 | cut -d'=' -f2)
+          
+          if [ -z "$TASK_ID" ]; then
+            echo "ERROR: Could not extract ceTaskId from scanner output"
+            exit 1
+          fi
+
+          echo "TASK_ID=$TASK_ID" >> $GITHUB_ENV
+          echo "Extracted ceTaskId: $TASK_ID"
+
+      # 3) taskId 로 분석 완료 대기
       - name: Wait for SonarQube Analysis
         run: |
-          PROJECT_KEY="${{ github.event.repository.name }}"
-
-          # 최근 실행된 ceTaskId 가져오기
-          TASK_ID=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-            "${{ secrets.SONAR_HOST_URL }}/api/ce/component?component=${PROJECT_KEY}" \
-            | jq -r '.current.taskId')
-
-          echo "Task ID: $TASK_ID"
-
-          # 상태 확인 루프
           for i in {1..30}; do
             STATUS=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
               "${{ secrets.SONAR_HOST_URL }}/api/ce/task?id=${TASK_ID}" \
@@ -50,7 +58,7 @@ jobs:
           echo "Timeout waiting for SonarQube analysis."
           exit 1
 
-      # SonarQube 결과 JSON 추출
+      # 4) SonarQube 이슈 JSON 가져오기
       - name: Fetch SonarQube Issues
         run: |
           PROJECT_KEY="${{ github.event.repository.name }}"
@@ -59,7 +67,7 @@ jobs:
             | jq '.' > sonar_issues.json
           echo "Result saved to sonar_issues.json"
 
-      # Slack 으로 전송
+      # 5) Slack 전송
       - name: Send SonarQube Result to Slack
         run: |
           curl -X POST -H 'Content-type: application/json' \
