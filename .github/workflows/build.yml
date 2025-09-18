@@ -78,13 +78,13 @@ jobs:
           FILESIZE=$(stat -c%s "$FILE")
 
           echo "Step1: 요청 upload_url..."
+          JSON_PAYLOAD=$(jq -n --arg fn "$FILE" --argjson len $FILESIZE '{filename:$fn, length:$len}')
+          echo "Request JSON: $JSON_PAYLOAD"
+
           RESPONSE=$(curl -s -X POST https://slack.com/api/files.getUploadURLExternal \
             -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"filename\": \"$FILE\",
-              \"length\": $FILESIZE
-            }")
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$JSON_PAYLOAD")
 
           echo "UploadURL Response: $RESPONSE"
           UPLOAD_URL=$(echo "$RESPONSE" | jq -r '.upload_url')
@@ -99,12 +99,14 @@ jobs:
           curl -s -X POST -F file=@$FILE "$UPLOAD_URL"
 
           echo "Step3: 파일 채널에 공유..."
+          COMPLETE_PAYLOAD=$(jq -n \
+            --arg fid "$FILE_ID" \
+            --arg cid "${{ secrets.SLACK_CHANNEL_ID }}" \
+            --arg comment "SonarQube Analysis result for project: ${{ github.event.repository.name }}" \
+            '{files:[{id:$fid}], channel_id:$cid, initial_comment:$comment}')
+
           curl -s -X POST https://slack.com/api/files.completeUploadExternal \
             -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"files\": [{\"id\": \"$FILE_ID\"}],
-              \"channel_id\": \"${{ secrets.SLACK_CHANNEL_ID }}\",
-              \"initial_comment\": \"SonarQube Analysis result for project: ${{ github.event.repository.name }}\"
-            }"
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$COMPLETE_PAYLOAD"
 
