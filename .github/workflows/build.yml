@@ -93,24 +93,34 @@ jobs:
             exit 1
           fi
 
-          # 2) Responses API 호출
+          # 2) 프롬프트 정의
           PROMPT="다음 SonarQube 분석 JSON을 정리해줘.
           1) Quality Gate 상태 요약 (OK/FAIL 여부 및 주요 조건).
           2) 심각도(Severity)별 이슈 개수 통계.
           3) 상위 10개 주요 이슈 (id, rule, severity, component, message)."
 
+          # 3) JSON body 안전하게 생성
+          JSON_BODY=$(jq -n \
+            --arg model "gpt-4.1-mini" \
+            --arg input "$PROMPT" \
+            --arg file_id "$FILE_ID" \
+            '{model:$model, input:$input, input_files:[{file_id:$file_id}]}')
+
+          # 4) Responses API 호출
           RESPONSE=$(curl -s -X POST "https://api.openai.com/v1/responses" \
             -H "Authorization: Bearer ${{ secrets.OPENAI_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"model\": \"gpt-4.1-mini\",
-              \"input\": \"$PROMPT\",
-              \"input_files\": [ { \"file_id\": \"$FILE_ID\" } ]
-            }")
+            -d "$JSON_BODY")
 
           echo "Raw ChatGPT response: $RESPONSE"
 
-          SUMMARY=$(echo "$RESPONSE" | jq -r '.output[0].content[0].text')
+          SUMMARY=$(echo "$RESPONSE" | jq -r '.output[0].content[0].text // .choices[0].message.content // empty')
+
+          if [ -z "$SUMMARY" ] || [ "$SUMMARY" = "null" ]; then
+            echo "ChatGPT did not return summary"
+            exit 1
+          fi
+
           echo "SUMMARY<<EOF" >> $GITHUB_ENV
           echo "$SUMMARY" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
