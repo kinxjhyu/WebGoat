@@ -74,9 +74,9 @@ jobs:
       # 5) Slack 으로 JSON 파일 업로드
       - name: Upload SonarQube Issues to Slack
         run: |
-          curl -F file=@sonar_issues.json \
-               -F "initial_comment=SonarQube Analysis result for project: ${{ github.event.repository.name }}" \
-               -F channels=${{ secrets.SLACK_CHANNEL_ID }} \
+          curl -X POST \
                -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-               https://slack.com/api/files.upload
-               #
+               -F "channels=${{ secrets.SLACK_CHANNEL_ID }}" \
+               -F "initial_comment=SonarQube Analysis result for project: ${{ github.event.repository.name }}" \
+               -F "file=@sonar_issues.json" \
+               https://slack.com/api/files.uploadV2
