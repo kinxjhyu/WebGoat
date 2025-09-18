@@ -78,7 +78,7 @@ jobs:
           FILESIZE=$(stat -c%s "$FILE")
 
           echo "Step1: 요청 upload_url..."
-          JSON_PAYLOAD=$(jq -n --arg fn "$FILE" --argjson len $FILESIZE '{filename:$fn, length:$len}')
+          JSON_PAYLOAD=$(jq -n --arg fn "$FILE" --argjson len $FILESIZE '{file_name:$fn, length:$len}')
           echo "Request JSON: $JSON_PAYLOAD"
 
           RESPONSE=$(curl -s -X POST https://slack.com/api/files.getUploadURLExternal \
