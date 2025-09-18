@@ -26,20 +26,59 @@ jobs:
       #   env:
       #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+jobs:
+  sonarqube:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SonarQube Scan
+        if: github.event_name == 'pull_request'
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_PROJECT_KEY: ${{ github.event.repository.name }}
+
+      # 분석 완료 대기
+      - name: Wait for SonarQube Analysis
+        if: github.event_name == 'pull_request'
+        run: |
+          PROJECT_KEY="${{ github.event.repository.name }}"
+          echo "Waiting for SonarQube analysis of project $PROJECT_KEY..."
+          for i in {1..30}; do
+            STATUS=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+              "${{ secrets.SONAR_HOST_URL }}/api/ce/component?component=${PROJECT_KEY}" \
+              | jq -r '.queue[0].status // .current.status')
+            
+            echo "Current status: $STATUS"
+            if [ "$STATUS" = "SUCCESS" ]; then
+              echo "Analysis completed successfully."
+              exit 0
+            elif [ "$STATUS" = "FAILED" ]; then
+              echo "Analysis failed."
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Timeout waiting for SonarQube analysis."
+          exit 1
 
       # SonarQube 결과 JSON 추출
       - name: Fetch SonarQube Issues
-        #if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request'
         run: |
+          PROJECT_KEY="${{ github.event.repository.name }}"
           curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-            "${{ secrets.SONAR_HOST_URL }}/api/issues/search?componentKeys=${{ github.repository }}" \
+            "${{ secrets.SONAR_HOST_URL }}/api/issues/search?componentKeys=${PROJECT_KEY}" \
             | jq '.' > sonar_issues.json
           echo "Result saved to sonar_issues.json"
-      
+
       # Slack 으로 전송
       - name: Send SonarQube Result to Slack
-        #if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request'
         run: |
           curl -X POST -H 'Content-type: application/json' \
             --data "$(jq -Rs '{text: .}' sonar_issues.json)" \
             ${{ secrets.SLACK_WEBHOOK_URL }}
+
