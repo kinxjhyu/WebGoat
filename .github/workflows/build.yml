@@ -71,12 +71,40 @@ jobs:
             | jq '.' > sonar_issues.json
           echo "Result saved to sonar_issues.json"
 
-      # 5) Slack 으로 JSON 파일 업로드
+      # 5) Slack 으로 JSON 파일 업로드 (files.uploadV2 3단계)
       - name: Upload SonarQube Issues to Slack
-        uses: slackapi/slack-github-action@v1.25.0
-        with:
-          channel-id: ${{ secrets.SLACK_CHANNEL_ID }}
-          slack-message: |
-            SonarQube Analysis result for project: ${{ github.event.repository.name }}
-        env:
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          FILE="sonar_issues.json"
+          FILESIZE=$(stat -c%s "$FILE")
+
+          echo "Step1: 요청 upload_url..."
+          RESPONSE=$(curl -s -X POST https://slack.com/api/files.getUploadURLExternal \
+            -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"filename\": \"$FILE\",
+              \"length\": $FILESIZE
+            }")
+
+          echo "UploadURL Response: $RESPONSE"
+          UPLOAD_URL=$(echo "$RESPONSE" | jq -r '.upload_url')
+          FILE_ID=$(echo "$RESPONSE" | jq -r '.file_id')
+
+          if [ "$UPLOAD_URL" = "null" ] || [ -z "$UPLOAD_URL" ]; then
+            echo "Failed to get upload_url"
+            exit 1
+          fi
+
+          echo "Step2: 파일 업로드..."
+          curl -s -X POST -F file=@$FILE "$UPLOAD_URL"
+
+          echo "Step3: 파일 채널에 공유..."
+          curl -s -X POST https://slack.com/api/files.completeUploadExternal \
+            -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"files\": [{\"id\": \"$FILE_ID\"}],
+              \"channel_id\": \"${{ secrets.SLACK_CHANNEL_ID }}\",
+              \"initial_comment\": \"SonarQube Analysis result for project: ${{ github.event.repository.name }}\"
+            }"
+
