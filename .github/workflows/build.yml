@@ -5,39 +5,38 @@ on:
     branches:
       - main
 
-
 jobs:
-  build:
-    name: Build and analyze
+  sonarqube:
     runs-on: ubuntu-latest
-    
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
-      - uses: sonarsource/sonarqube-scan-action@v3
+
+      - name: SonarQube Scan
+        id: scan
+        uses: sonarsource/sonarqube-scan-action@v3
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-      # If you wish to fail your job when the Quality Gate is red, uncomment the
-      # following lines. This would typically be used to fail a deployment.
-      # - uses: sonarsource/sonarqube-quality-gate-action@master
-      #   timeout-minutes: 5
-      #   env:
-      #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ github.event.repository.name }}
 
-
-      # 분석 완료 대기
+      # 분석 완료 대기 (Task API 사용)
       - name: Wait for SonarQube Analysis
-        #if: github.event_name == 'pull_request'
         run: |
           PROJECT_KEY="${{ github.event.repository.name }}"
-          echo "Waiting for SonarQube analysis of project $PROJECT_KEY..."
+
+          # 최근 실행된 ceTaskId 가져오기
+          TASK_ID=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+            "${{ secrets.SONAR_HOST_URL }}/api/ce/component?component=${PROJECT_KEY}" \
+            | jq -r '.current.taskId')
+
+          echo "Task ID: $TASK_ID"
+
+          # 상태 확인 루프
           for i in {1..30}; do
             STATUS=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-              "${{ secrets.SONAR_HOST_URL }}/api/ce/component?component=${PROJECT_KEY}" \
-              | jq -r '.queue[0].status // .current.status')
-            
+              "${{ secrets.SONAR_HOST_URL }}/api/ce/task?id=${TASK_ID}" \
+              | jq -r '.task.status')
+
             echo "Current status: $STATUS"
             if [ "$STATUS" = "SUCCESS" ]; then
               echo "Analysis completed successfully."
@@ -53,7 +52,6 @@ jobs:
 
       # SonarQube 결과 JSON 추출
       - name: Fetch SonarQube Issues
-        #if: github.event_name == 'pull_request'
         run: |
           PROJECT_KEY="${{ github.event.repository.name }}"
           curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
@@ -63,7 +61,6 @@ jobs:
 
       # Slack 으로 전송
       - name: Send SonarQube Result to Slack
-        #if: github.event_name == 'pull_request'
         run: |
           curl -X POST -H 'Content-type: application/json' \
             --data "$(jq -Rs '{text: .}' sonar_issues.json)" \
