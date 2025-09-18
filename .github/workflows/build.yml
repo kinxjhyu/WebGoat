@@ -75,11 +75,8 @@ jobs:
       - name: Upload SonarQube Issues to Slack
         uses: slackapi/slack-github-action@v1.25.0
         with:
-          with.channel-id: ${{ secrets.SLACK_CHANNEL_ID }}
-          payload: |
-            {
-              "text": "SonarQube Analysis result for project: ${{ github.event.repository.name }}"
-            }
+          channel-id: ${{ secrets.SLACK_CHANNEL_ID }}
+          slack-message: |
+            SonarQube Analysis result for project: ${{ github.event.repository.name }}
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-            #
