@@ -80,3 +80,15 @@ jobs:
                -F "initial_comment=SonarQube Analysis result for project: ${{ github.event.repository.name }}" \
                -F "file=@sonar_issues.json" \
                https://slack.com/api/files.uploadV2
+
+      - name: Upload SonarQube Issues to Slack
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "channel": "${{ secrets.SLACK_CHANNEL_ID }}",
+              "text": "SonarQube Analysis result for project: ${{ github.event.repository.name }}"
+            }
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+
