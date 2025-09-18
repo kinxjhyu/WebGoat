@@ -71,17 +71,11 @@ jobs:
             | jq '.' > sonar_issues.json
           echo "Result saved to sonar_issues.json"
 
-      # 5) 이메일 전송
-      - name: Send SonarQube Issues via Email
-        uses: dawidd6/action-send-mail@v3
+      # 5) JSON 파일을 GitHub Issue 로 등록
+      - name: Create GitHub Issue with SonarQube Results
+        uses: peter-evans/create-issue-from-file@v4
         with:
-          server_address: ${{ secrets.SMTP_SERVER }}
-          server_port: ${{ secrets.SMTP_PORT }}
-          username: ${{ secrets.SMTP_USERNAME }}
-          password: ${{ secrets.SMTP_PASSWORD }}
-          subject: "SonarQube Analysis result for project: ${{ github.event.repository.name }}"
-          to: jhyu@kinx.net
-          from: "SonarQube CI <${{ secrets.SMTP_USERNAME }}>"
-          body: "Attached is the SonarQube issues report (JSON)."
-          attachments: sonar_issues.json
+          title: "SonarQube Analysis result for project: ${{ github.event.repository.name }}"
+          content-filepath: sonar_issues.json
+          labels: report, sonarqube
 
