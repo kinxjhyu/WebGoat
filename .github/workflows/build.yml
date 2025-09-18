@@ -83,7 +83,7 @@ jobs:
 
           RESPONSE=$(curl -s -X POST https://slack.com/api/files.getUploadURLExternal \
             -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-            -H "Content-Type: application/json; charset=utf-8" \
+            -H "Content-Type: application/json" \
             -d "$JSON_PAYLOAD")
 
           echo "UploadURL Response: $RESPONSE"
@@ -107,6 +107,6 @@ jobs:
 
           curl -s -X POST https://slack.com/api/files.completeUploadExternal \
             -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-            -H "Content-Type: application/json; charset=utf-8" \
+            -H "Content-Type: application/json" \
             -d "$COMPLETE_PAYLOAD"
 
