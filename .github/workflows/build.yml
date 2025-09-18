@@ -71,26 +71,12 @@ jobs:
             | jq '.' > sonar_issues.json
           echo "Result saved to sonar_issues.json"
 
-      # 5) Slack 으로 요약 전송
-      - name: Send SonarQube Summary to Slack
+      # 5) Slack 으로 JSON 파일 업로드
+      - name: Upload SonarQube Issues to Slack
         run: |
-          BUGS=$(jq '.issues | map(select(.type=="BUG")) | length' sonar_issues.json)
-          VULNS=$(jq '.issues | map(select(.type=="VULNERABILITY")) | length' sonar_issues.json)
-          CODE_SMELLS=$(jq '.issues | map(select(.type=="CODE_SMELL")) | length' sonar_issues.json)
-
-          MSG="*SonarQube Analysis Result* for \`${{ github.event.repository.name }}\`\n\
-          - 🐞 Bugs: $BUGS\n\
-          - 🔓 Vulnerabilities: $VULNS\n\
-          - 🧹 Code Smells: $CODE_SMELLS"
-
-          curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\": \"$MSG\"}" \
-            ${{ secrets.SLACK_WEBHOOK_URL }}
-
-      # (옵션) JSON 전체를 GitHub Artifact 로 보관
-      - name: Upload SonarQube Issues artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sonar-issues
-          path: sonar_issues.json
+          curl -F file=@sonar_issues.json \
+               -F "initial_comment=SonarQube Analysis result for project: ${{ github.event.repository.name }}" \
+               -F channels=${{ secrets.SLACK_CHANNEL_ID }} \
+               -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+               https://slack.com/api/files.upload
 
