@@ -28,18 +28,18 @@ jobs:
 
 
       # SonarQube 결과 JSON 추출
-      #- name: Fetch SonarQube Issues
-      #  #if: github.event_name == 'pull_request'
-      #  run: |
-      #    curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-      #      "${{ secrets.SONAR_HOST_URL }}/api/issues/search?componentKeys=${{ github.repository }}" \
-      #      | jq '.' > sonar_issues.json
-      #    echo "Result saved to sonar_issues.json"
-      #
-      ## Slack 으로 전송
-      #- name: Send SonarQube Result to Slack
-      #  #if: github.event_name == 'pull_request'
-      #  run: |
-      #    curl -X POST -H 'Content-type: application/json' \
-      #      --data "$(jq -Rs '{text: .}' sonar_issues.json)" \
-      #      ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Fetch SonarQube Issues
+        #if: github.event_name == 'pull_request'
+        run: |
+          curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+            "${{ secrets.SONAR_HOST_URL }}/api/issues/search?componentKeys=${{ github.repository }}" \
+            | jq '.' > sonar_issues.json
+          echo "Result saved to sonar_issues.json"
+      
+      # Slack 으로 전송
+      - name: Send SonarQube Result to Slack
+        #if: github.event_name == 'pull_request'
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "$(jq -Rs '{text: .}' sonar_issues.json)" \
+            ${{ secrets.SLACK_WEBHOOK_URL }}
