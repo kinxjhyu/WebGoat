@@ -42,15 +42,16 @@ jobs:
           cat sonar_issues_summary.txt || echo "(empty)"
           echo "============================="
 
-      # 4) ChatGPT API 호출 + 원문 저장 + 파싱 결과 확인
+      # 4) ChatGPT API 호출 + 응답 파싱
       - name: Ask ChatGPT for explanation
         id: chatgpt
         run: |
-          PROMPT="sonarqube 점검 결과 설명해줘. (아래는 jq 로 추출한 값 입력)\n\n$(cat sonar_issues_summary.txt)"
-          
-          echo "===== Sending prompt to ChatGPT ====="
+          # SonarQube 이슈 요약을 JSON-safe 문자열로 변환
+          PROMPT=$(cat sonar_issues_summary.txt | jq -Rs .)
+
+          echo "===== Prompt to ChatGPT ====="
           echo "$PROMPT"
-          echo "====================================="
+          echo "============================="
 
           RAW_RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
@@ -58,24 +59,24 @@ jobs:
             -d "{
               \"model\": \"gpt-5\",
               \"messages\": [
-                {\"role\": \"user\", \"content\": \"$PROMPT\"}
+                {\"role\": \"user\", \"content\": $PROMPT}
               ],
               \"max_tokens\": 500
             }")
 
-          echo "===== Raw ChatGPT response ====="
-          echo "$RAW_RESPONSE"
-          echo "================================"
-
           echo "$RAW_RESPONSE" > raw_chatgpt_response.json
 
-          RESPONSE=$(cat raw_chatgpt_response.json | jq -r '.choices[0].message.content')
+          echo "===== Raw ChatGPT response ====="
+          cat raw_chatgpt_response.json
+          echo "================================"
+
+          RESPONSE=$(jq -r '.choices[0].message.content' raw_chatgpt_response.json)
           echo "===== Parsed ChatGPT response ====="
           echo "$RESPONSE"
           echo "==================================="
           echo "$RESPONSE" > chatgpt_response.txt
 
-      # 5) Slack 전송 (payload 확인)
+      # 5) Slack 전송 (ChatGPT 응답 전달)
       - name: Send ChatGPT Response to Slack
         run: |
           echo "===== ChatGPT Response file ====="
