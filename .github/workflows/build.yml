@@ -38,15 +38,21 @@ jobs:
       - name: Extract OPEN issues summary
         run: |
           jq -r '.issues[] | select(.status=="OPEN") | "line: \(.line // "-")\tseverity: \(.severity)\tcode: \(.component)\tmessage: \(.message)"' sonar_issues.json > sonar_issues_summary.txt
-          echo "Summary extracted:"
-          cat sonar_issues_summary.txt
+          echo "===== Extracted summary ====="
+          cat sonar_issues_summary.txt || echo "(empty)"
+          echo "============================="
 
-      # 4) ChatGPT API 로 설명 요청
+      # 4) ChatGPT API 호출 + 원문 저장 + 파싱 결과 확인
       - name: Ask ChatGPT for explanation
         id: chatgpt
         run: |
           PROMPT="sonarqube 점검 결과 설명해줘. (아래는 jq 로 추출한 값 입력)\n\n$(cat sonar_issues_summary.txt)"
-          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
+          
+          echo "===== Sending prompt to ChatGPT ====="
+          echo "$PROMPT"
+          echo "====================================="
+
+          RAW_RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.OPENAI_API_KEY }}" \
             -d "{
@@ -55,16 +61,34 @@ jobs:
                 {\"role\": \"user\", \"content\": \"$PROMPT\"}
               ],
               \"max_tokens\": 500
-            }" | jq -r '.choices[0].message.content')
+            }")
 
+          echo "===== Raw ChatGPT response ====="
+          echo "$RAW_RESPONSE"
+          echo "================================"
+
+          echo "$RAW_RESPONSE" > raw_chatgpt_response.json
+
+          RESPONSE=$(cat raw_chatgpt_response.json | jq -r '.choices[0].message.content')
+          echo "===== Parsed ChatGPT response ====="
+          echo "$RESPONSE"
+          echo "==================================="
           echo "$RESPONSE" > chatgpt_response.txt
-          echo "ChatGPT Response:"
-          cat chatgpt_response.txt
 
-      # 5) Slack 특정 채널로 ChatGPT 설명 결과 전송
+      # 5) Slack 전송 (payload 확인)
       - name: Send ChatGPT Response to Slack
         run: |
+          echo "===== ChatGPT Response file ====="
+          cat chatgpt_response.txt || echo "(empty)"
+          echo "================================="
+
           MSG=$(cat chatgpt_response.txt | jq -Rs .)
+
+          echo "===== Slack payload ====="
+          echo "{\"text\": $MSG}"
+          echo "========================="
+
           curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\": $MSG}" \
-            ${{ secrets.SLACK_WEBHOOK_URL }}
+               --data "{\"text\": $MSG}" \
+               ${{ secrets.SLACK_WEBHOOK_URL }}
+
