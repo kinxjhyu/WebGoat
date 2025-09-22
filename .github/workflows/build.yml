@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   build:
@@ -26,113 +25,46 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
           SONAR_PROJECT_KEY: ${{ github.event.repository.name }}
 
-      # 2) report-task.txt 에서 ceTaskId 추출
-      - name: Extract ceTaskId
-        id: extract-task
-        run: |
-          TASK_FILE=".scannerwork/report-task.txt"
-          if [ ! -f "$TASK_FILE" ]; then
-            echo "ERROR: $TASK_FILE not found!"
-            exit 1
-          fi
-
-          TASK_ID=$(grep "ceTaskId" $TASK_FILE | cut -d'=' -f2)
-          if [ -z "$TASK_ID" ]; then
-            echo "ERROR: Could not extract ceTaskId from $TASK_FILE"
-            exit 1
-          fi
-
-          echo "TASK_ID=$TASK_ID" >> $GITHUB_ENV
-          echo "Extracted ceTaskId: $TASK_ID"
-
-      # 3) Task API 로 분석 완료 대기
-      - name: Wait for SonarQube Analysis
-        run: |
-          for i in {1..30}; do
-            STATUS=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-              "${{ secrets.SONAR_HOST_URL }}/api/ce/task?id=${TASK_ID}" \
-              | jq -r '.task.status')
-
-            echo "Current status: $STATUS"
-            if [ "$STATUS" = "SUCCESS" ]; then
-              echo "Analysis completed successfully."
-              exit 0
-            elif [ "$STATUS" = "FAILED" ]; then
-              echo "Analysis failed."
-              exit 1
-            fi
-            sleep 10
-          done
-          echo "Timeout waiting for SonarQube analysis."
-          exit 1
-
-      # 4) SonarQube 이슈 JSON 가져오기
+      # 2) SonarQube 이슈 JSON 가져오기
       - name: Fetch SonarQube Issues
         run: |
           PROJECT_KEY="${{ github.event.repository.name }}"
           curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-            "${{ secrets.SONAR_HOST_URL }}/api/issues/search?componentKeys=${PROJECT_KEY}" \
+            "${{ secrets.SONAR_HOST_URL }}/api/issues/search?componentKeys=${PROJECT_KEY}&ps=500" \
             | jq '.' > sonar_issues.json
           echo "Result saved to sonar_issues.json"
 
-      # 5) ChatGPT API 호출 (분석 요약)
-      - name: Analyze with ChatGPT
-        id: analyze
+      # 3) jq 로 OPEN 상태 이슈 요약 추출
+      - name: Extract OPEN issues summary
         run: |
-          # 1) 파일 업로드
-          FILE_RESPONSE=$(curl -s -X POST "https://api.openai.com/v1/files" \
-            -H "Authorization: Bearer ${{ secrets.OPENAI_API_KEY }}" \
-            -F "purpose=assistants" \
-            -F "file=@sonar_issues.json")
+          jq -r '.issues[] | select(.status=="OPEN") | "line: \(.line // "-")\tseverity: \(.severity)\tcode: \(.component)\tmessage: \(.message)"' sonar_issues.json > sonar_issues_summary.txt
+          echo "Summary extracted:"
+          cat sonar_issues_summary.txt
 
-          echo "File upload response: $FILE_RESPONSE"
-          FILE_ID=$(echo "$FILE_RESPONSE" | jq -r '.id')
-
-          if [ -z "$FILE_ID" ] || [ "$FILE_ID" = "null" ]; then
-            echo "File upload failed"
-            exit 1
-          fi
-
-          # 2) 프롬프트 정의
-          PROMPT="다음 SonarQube 분석 JSON을 정리해줘.
-          1) Quality Gate 상태 요약 (OK/FAIL 여부 및 주요 조건).
-          2) 심각도(Severity)별 이슈 개수 통계.
-          3) 상위 10개 주요 이슈 (id, rule, severity, component, message)."
-
-          # 3) JSON body 안전하게 생성
-          JSON_BODY=$(jq -n \
-            --arg model "gpt-4.1-mini" \
-            --arg input "$PROMPT" \
-            --arg file_id "$FILE_ID" \
-            '{model:$model, input:$input, input_files:[{file_id:$file_id}]}')
-
-          # 4) Responses API 호출
-          RESPONSE=$(curl -s -X POST "https://api.openai.com/v1/responses" \
-            -H "Authorization: Bearer ${{ secrets.OPENAI_API_KEY }}" \
+      # 4) ChatGPT API 로 설명 요청
+      - name: Ask ChatGPT for explanation
+        id: chatgpt
+        run: |
+          PROMPT="sonarqube 점검 결과 설명해줘. (아래는 jq 로 추출한 값 입력)\n\n$(cat sonar_issues_summary.txt)"
+          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
-            -d "$JSON_BODY")
+            -H "Authorization: Bearer ${{ secrets.OPENAI_API_KEY }}" \
+            -d "{
+              \"model\": \"gpt-5\",
+              \"messages\": [
+                {\"role\": \"user\", \"content\": \"$PROMPT\"}
+              ],
+              \"max_tokens\": 500
+            }" | jq -r '.choices[0].message.content')
 
-          echo "Raw ChatGPT response: $RESPONSE"
+          echo "$RESPONSE" > chatgpt_response.txt
+          echo "ChatGPT Response:"
+          cat chatgpt_response.txt
 
-          SUMMARY=$(echo "$RESPONSE" | jq -r '.output[0].content[0].text // .choices[0].message.content // empty')
-
-          if [ -z "$SUMMARY" ] || [ "$SUMMARY" = "null" ]; then
-            echo "ChatGPT did not return summary"
-            exit 1
-          fi
-
-          echo "SUMMARY<<EOF" >> $GITHUB_ENV
-          echo "$SUMMARY" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-
-      # 6) Slack으로 결과 전송
-      - name: Send Summary to Slack
+      # 5) Slack 특정 채널로 ChatGPT 설명 결과 전송
+      - name: Send ChatGPT Response to Slack
         run: |
-          curl -X POST https://slack.com/api/chat.postMessage \
-            -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-            -H "Content-type: application/json" \
-            --data "{
-              \"channel\": \"${{ secrets.SLACK_CHANNEL_ID }}\",
-              \"text\": \"SonarQube Analysis Summary for project: ${{ github.event.repository.name }}\n\n${SUMMARY}\"
-            }"
-
+          MSG=$(cat chatgpt_response.txt | jq -Rs .)
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\": $MSG}" \
+            ${{ secrets.SLACK_WEBHOOK_URL }}
