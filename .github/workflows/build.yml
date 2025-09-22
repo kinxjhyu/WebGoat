@@ -1,4 +1,4 @@
-name: SonarQube + ChatGPT + Slack Notify
+name: Build
 
 on:
   push:
@@ -9,53 +9,86 @@ permissions:
   contents: read
 
 jobs:
-  analyze-and-notify:
+  build:
+    name: Build and analyze
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Run SonarQube scan
+      # 1) SonarQube 스캔 실행
+      - name: SonarQube Scan
+        id: scan
+        uses: sonarsource/sonarqube-scan-action@v3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_PROJECT_KEY: ${{ github.event.repository.name }}
+
+      # 2) SonarQube 이슈 JSON 가져오기
+      - name: Fetch SonarQube Issues
         run: |
-          sonar-scanner \
-            -Dsonar.projectKey=WebGoat \
-            -Dsonar.host.url=http://sonarqube.kinxcloud.co.kr:9000 \
-            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+          PROJECT_KEY="${{ github.event.repository.name }}"
+          curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+            "${{ secrets.SONAR_HOST_URL }}/api/issues/search?componentKeys=${PROJECT_KEY}&ps=500" \
+            | jq '.' > sonar_issues.json
+          echo "Result saved to sonar_issues.json"
 
-      - name: Get SonarQube Issues JSON
+      # 3) jq 로 OPEN 상태 이슈 요약 추출
+      - name: Extract OPEN issues summary
         run: |
-          curl -u ${{ secrets.SONAR_USER }}:${{ secrets.SONAR_PASS }} \
-            "http://sonarqube.kinxcloud.co.kr:9000/api/issues/search?componentKeys=WebGoat&ps=10" \
-            -o sonar_issues.json
+          jq -r '.issues[] | select(.status=="OPEN") | "line: \(.line // "-")\tseverity: \(.severity)\tcode: \(.component)\tmessage: \(.message)"' sonar_issues.json > sonar_issues_summary.txt
+          echo "===== Extracted summary ====="
+          cat sonar_issues_summary.txt || echo "(empty)"
+          echo "============================="
 
-      - name: Ask ChatGPT (in Korean)
+      # 4) ChatGPT API 호출 + 응답 파싱 (한국어 요청)
+      - name: Ask ChatGPT for explanation
         id: chatgpt
         run: |
-          PROMPT="이 SonarQube 결과를 한국어로 분석하고 요약해줘:\n$(cat sonar_issues.json)"
-          
-          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
+          # SonarQube 이슈 요약을 JSON-safe 문자열로 변환
+          ISSUES=$(cat sonar_issues_summary.txt | jq -Rs .)
+          PROMPT=$(jq -n --arg issues "$ISSUES" '{"role":"user","content":"다음은 SonarQube 점검 결과입니다. 한국어로 설명해줘.\n\n\($issues)"}')
+
+          echo "===== Prompt to ChatGPT ====="
+          echo "$PROMPT"
+          echo "============================="
+
+          RAW_RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.OPENAI_API_KEY }}" \
             -d "{
               \"model\": \"gpt-5\",
-              \"messages\": [
-                {\"role\": \"system\", \"content\": \"모든 답변은 반드시 한국어로 작성해 주세요.\"},
-                {\"role\": \"user\", \"content\": \"$PROMPT\"}
-              ]
-            }" | jq -r '.choices[0].message.content')
+              \"messages\": [$PROMPT],
+              \"max_completion_tokens\": 2000
+            }")
 
-          echo "ChatGPT Response: $RESPONSE"
-          echo "response=$RESPONSE" >> $GITHUB_ENV
+          echo "$RAW_RESPONSE" > raw_chatgpt_response.json
 
-      - name: Send to Slack
+          echo "===== Raw ChatGPT response ====="
+          cat raw_chatgpt_response.json
+          echo "================================"
+
+          RESPONSE=$(jq -r '.choices[0].message.content' raw_chatgpt_response.json)
+          echo "===== Parsed ChatGPT response ====="
+          echo "$RESPONSE"
+          echo "==================================="
+          echo "$RESPONSE" > chatgpt_response.txt
+
+      # 5) Slack 전송 (ChatGPT 응답 전달)
+      - name: Send ChatGPT Response to Slack
         run: |
-          curl -X POST \
-            -H "Content-type: application/json" \
-            -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-            --data "{
-              \"channel\": \"#sonarqube\",
-              \"text\": \"${{ env.response }}\"
-            }" \
-            https://slack.com/api/chat.postMessage
+          echo "===== ChatGPT Response file ====="
+          cat chatgpt_response.txt || echo "(empty)"
+          echo "================================="
 
-            #
+          MSG=$(cat chatgpt_response.txt | jq -Rs .)
+
+          echo "===== Slack payload ====="
+          echo "{\"text\": $MSG}"
+          echo "========================="
+
+          curl -X POST -H 'Content-type: application/json' \
+               --data "{\"text\": $MSG}" \
+               ${{ secrets.SLACK_WEBHOOK_URL }}
+
