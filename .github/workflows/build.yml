@@ -61,7 +61,7 @@ jobs:
               \"messages\": [
                 {\"role\": \"user\", \"content\": $PROMPT}
               ],
-              \"max_completion_tokens\": 500
+              \"max_completion_tokens\": 5000
             }")
 
           echo "$RAW_RESPONSE" > raw_chatgpt_response.json
