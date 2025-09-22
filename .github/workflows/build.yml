@@ -1,3 +1,4 @@
+🔹 전체 수정된 워크플로우
 name: Build
 
 on:
@@ -61,7 +62,7 @@ jobs:
               \"messages\": [
                 {\"role\": \"user\", \"content\": $PROMPT}
               ],
-              \"max_tokens\": 500
+              \"max_completion_tokens\": 500
             }")
 
           echo "$RAW_RESPONSE" > raw_chatgpt_response.json
@@ -93,4 +94,3 @@ jobs:
                --data "{\"text\": $MSG}" \
                ${{ secrets.SLACK_WEBHOOK_URL }}
 
-               #
