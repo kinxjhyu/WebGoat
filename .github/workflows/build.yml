@@ -47,7 +47,7 @@ jobs:
         id: chatgpt
         run: |
           ISSUES=$(cat sonar_issues_summary.txt | jq -Rs .)
-          PROMPT=$(jq -n --arg issues "$ISSUES" '{"role":"user","content":"다음은 SonarQube 점검 결과입니다. 각 항목의 의미와 개선 방법을 한국어로 설명해줘.\n\n\($issues)"}')
+          PROMPT=$(jq -n --arg issues "$ISSUES" '{"role":"user","content":"다음은 SonarQube 점검 결과입니다. 한국어로 짧고 구체적으로 설명해줘.\n\n\($issues)"}')
 
           RAW_RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
@@ -55,21 +55,16 @@ jobs:
             -d "{
               \"model\": \"gpt-5\",
               \"messages\": [$PROMPT],
-              \"max_completion_tokens\": 1500
+              \"max_completion_tokens\": 1000
             }")
 
           echo "$RAW_RESPONSE" > raw_chatgpt_response.json
 
           RESPONSE=$(jq -r '.choices[0].message.content' raw_chatgpt_response.json)
-
-          # ChatGPT 응답에서 코드 블록 자동 감지
-          # (코드 블록이 없으면 전체 응답을 일반 텍스트로 감싸고,
-          # 있으면 그대로 Slack에 전달)
-          if echo "$RESPONSE" | grep -q '```'; then
-            echo "$RESPONSE" > chatgpt_response.txt
-          else
-            echo "$RESPONSE" > chatgpt_response.txt
+          if [ -z "$RESPONSE" ] || [ "$RESPONSE" = "null" ]; then
+            RESPONSE="⚠️ ChatGPT 설명을 생성하지 못했습니다."
           fi
+          echo "$RESPONSE" > chatgpt_response.txt
 
       # 5) Slack 전송 (SonarQube 결과 + ChatGPT 설명)
       - name: Send Combined Result to Slack
@@ -81,13 +76,12 @@ jobs:
           cat chatgpt_response.txt || echo "(empty)"
           echo "============================="
 
-          SQ_SUMMARY=$(cat sonar_issues_summary.txt)
-          GPT_RESPONSE=$(cat chatgpt_response.txt)
+          SQ_SUMMARY=$(jq -Rs . sonar_issues_summary.txt)
+          GPT_RESPONSE=$(jq -Rs . chatgpt_response.txt)
 
-          # Slack Block Kit payload 구성
           PAYLOAD=$(jq -n \
-            --arg summary "```\n$SQ_SUMMARY\n```" \
-            --arg gpt "$GPT_RESPONSE" \
+            --arg summary "```$(cat sonar_issues_summary.txt)```" \
+            --arg gpt "$(cat chatgpt_response.txt)" \
             '{
               blocks: [
                 {type: "section", text: {type: "mrkdwn", text: "*📋 SonarQube 점검 결과 (OPEN 상태 이슈)*\n\($summary)"}},
