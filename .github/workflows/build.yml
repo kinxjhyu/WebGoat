@@ -46,13 +46,8 @@ jobs:
       - name: Ask ChatGPT for explanation
         id: chatgpt
         run: |
-          # SonarQube 이슈 요약을 JSON-safe 문자열로 변환
           ISSUES=$(cat sonar_issues_summary.txt | jq -Rs .)
-          PROMPT=$(jq -n --arg issues "$ISSUES" '{"role":"user","content":"다음은 SonarQube 점검 결과입니다. 한국어로 설명해줘.\n\n\($issues)"}')
-
-          echo "===== Prompt to ChatGPT ====="
-          echo "$PROMPT"
-          echo "============================="
+          PROMPT=$(jq -n --arg issues "$ISSUES" '{"role":"user","content":"다음은 SonarQube 점검 결과입니다. 각 항목의 의미와 개선 방법을 한국어로 설명해줘.\n\n\($issues)"}')
 
           RAW_RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
@@ -60,35 +55,51 @@ jobs:
             -d "{
               \"model\": \"gpt-5\",
               \"messages\": [$PROMPT],
-              \"max_completion_tokens\": 2000
+              \"max_completion_tokens\": 1500
             }")
 
           echo "$RAW_RESPONSE" > raw_chatgpt_response.json
 
-          echo "===== Raw ChatGPT response ====="
-          cat raw_chatgpt_response.json
-          echo "================================"
-
           RESPONSE=$(jq -r '.choices[0].message.content' raw_chatgpt_response.json)
-          echo "===== Parsed ChatGPT response ====="
-          echo "$RESPONSE"
-          echo "==================================="
-          echo "$RESPONSE" > chatgpt_response.txt
 
-      # 5) Slack 전송 (ChatGPT 응답 전달)
-      - name: Send ChatGPT Response to Slack
+          # ChatGPT 응답에서 코드 블록 자동 감지
+          # (코드 블록이 없으면 전체 응답을 일반 텍스트로 감싸고,
+          # 있으면 그대로 Slack에 전달)
+          if echo "$RESPONSE" | grep -q '```'; then
+            echo "$RESPONSE" > chatgpt_response.txt
+          else
+            echo "$RESPONSE" > chatgpt_response.txt
+          fi
+
+      # 5) Slack 전송 (SonarQube 결과 + ChatGPT 설명)
+      - name: Send Combined Result to Slack
         run: |
-          echo "===== ChatGPT Response file ====="
+          echo "===== SonarQube Summary ====="
+          cat sonar_issues_summary.txt || echo "(empty)"
+          echo "============================="
+          echo "===== ChatGPT Response ====="
           cat chatgpt_response.txt || echo "(empty)"
-          echo "================================="
+          echo "============================="
 
-          MSG=$(cat chatgpt_response.txt | jq -Rs .)
+          SQ_SUMMARY=$(cat sonar_issues_summary.txt)
+          GPT_RESPONSE=$(cat chatgpt_response.txt)
 
-          echo "===== Slack payload ====="
-          echo "{\"text\": $MSG}"
+          # Slack Block Kit payload 구성
+          PAYLOAD=$(jq -n \
+            --arg summary "```\n$SQ_SUMMARY\n```" \
+            --arg gpt "$GPT_RESPONSE" \
+            '{
+              blocks: [
+                {type: "section", text: {type: "mrkdwn", text: "*📋 SonarQube 점검 결과 (OPEN 상태 이슈)*\n\($summary)"}},
+                {type: "section", text: {type: "mrkdwn", text: "*🤖 ChatGPT 설명*\n\($gpt)"}}
+              ]
+            }')
+
+          echo "===== Slack Payload ====="
+          echo "$PAYLOAD"
           echo "========================="
 
           curl -X POST -H 'Content-type: application/json' \
-               --data "{\"text\": $MSG}" \
+               --data "$PAYLOAD" \
                ${{ secrets.SLACK_WEBHOOK_URL }}
 
