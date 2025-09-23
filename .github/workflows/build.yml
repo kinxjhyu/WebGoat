@@ -16,6 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Source code
+        run: ls -R
+
       # 1) SonarQube 스캔 실행
       - name: SonarQube Scan
         id: scan
